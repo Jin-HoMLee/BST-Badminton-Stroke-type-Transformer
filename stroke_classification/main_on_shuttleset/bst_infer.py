@@ -3,6 +3,8 @@ from torch import Tensor, nn
 from torch.utils.data import DataLoader
 
 from pathlib import Path
+from sklearn.metrics import f1_score
+import numpy as np
 
 import sys
 import os
@@ -14,6 +16,32 @@ from preparing_data.shuttleset_dataset import Dataset_npy_collated, \
 from model.bst import BST, BST_CG, BST_AP, BST_CG_AP
 
 
+def evaluate_metrics(y_true, y_pred, logits, classes):
+    """
+    Calculate evaluation metrics: Accuracy, Macro-F1, Min-F1, Top-2 Accuracy
+    """
+    # Convert to numpy
+    y_true_np = y_true.numpy()
+    y_pred_np = y_pred.numpy()
+    logits_np = logits.numpy()
+    
+    # 1. Accuracy
+    accuracy = (y_true == y_pred).float().mean().item()
+    
+    # 2. Macro-F1 (average F1 across all classes)
+    macro_f1 = f1_score(y_true_np, y_pred_np, average='macro')
+    
+    # 3. Min-F1 (minimum F1 score across all classes)
+    per_class_f1 = f1_score(y_true_np, y_pred_np, average=None)
+    min_f1 = np.min(per_class_f1)
+    
+    # 4. Top-2 Accuracy (prediction is correct if true label is in top-2 predictions)
+    top2_pred = torch.topk(logits, k=2, dim=1)[1]  # Get top-2 class indices
+    top2_accuracy = torch.any(top2_pred == y_true.unsqueeze(1), dim=1).float().mean().item()
+    
+    return accuracy, macro_f1, min_f1, top2_accuracy, per_class_f1
+
+
 @torch.no_grad()
 def infer(
     model: nn.Module,
@@ -22,6 +50,8 @@ def infer(
 ):
     model.eval()
     pred_ls = []
+    true_ls = []
+    logits_ls = []
 
     for (human_pose, pos, shuttle), video_len, labels in loader:
         human_pose: Tensor = human_pose.to(device)
@@ -35,8 +65,10 @@ def infer(
         pred = torch.argmax(logits, dim=1).cpu()
         
         pred_ls.append(pred)
+        true_ls.append(labels)
+        logits_ls.append(logits.cpu())
 
-    return torch.cat(pred_ls)
+    return torch.cat(pred_ls), torch.cat(true_ls), torch.cat(logits_ls)
 
 
 class Task:
@@ -156,9 +188,30 @@ if __name__ == '__main__':
     task.load_weight(Path('weight')
                      /"bst_CG_AP_JnB_bone_between_2_hits_with_max_limits_seq_100_merged_2.pt")
     
-    pred = task.infer()
-    # class IDs
-
+    pred, true_labels, logits = task.infer()
+    
+    # Get class names
     classes = get_merged_stroke_types() if use_merged_ShuttleSet else get_stroke_types()
-    pred_cls = [classes[e] for e in pred]
-    print(pred_cls)
+    
+    # Calculate all evaluation metrics
+    accuracy, macro_f1, min_f1, top2_accuracy, per_class_f1 = evaluate_metrics(
+        true_labels, pred, logits, classes
+    )
+    
+    # Print results
+    print("=" * 50)
+    print("EVALUATION RESULTS")
+    print("=" * 50)
+    print(f"Accuracy:      {accuracy:.4f} ({accuracy*100:.2f}%)")
+    print(f"Macro-F1:      {macro_f1:.4f}")
+    print(f"Min-F1:        {min_f1:.4f}")
+    print(f"Top-2 Accuracy: {top2_accuracy:.4f} ({top2_accuracy*100:.2f}%)")
+    print("=" * 50)
+    print(f"Total samples: {len(pred)}")
+    print(f"Correct predictions: {(pred == true_labels).sum()}")
+    print(f"Wrong predictions: {(pred != true_labels).sum()}")
+    
+    # Show per-class F1 scores for reference
+    print("\nPer-class F1 scores:")
+    for i, (class_name, f1) in enumerate(zip(classes, per_class_f1)):
+        print(f"{i:2d}. {class_name:<20} F1: {f1:.4f}")

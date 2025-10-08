@@ -141,8 +141,8 @@ def collate_npy(root_dir: Path, set_name: str, seq_len: int, save_dir: Path):
 
 
 if __name__ == '__main__':
-    seq_len = 30
-    use_3d_pose = True
+    seq_len = 100
+    use_3d_pose = False
 
     preparing_root = Path('preparing_data/ShuttleSet_data_merged')
 
@@ -158,10 +158,10 @@ if __name__ == '__main__':
             raise NotImplementedError(f'Invalid seq_len: {seq_len}. Must be 30 or 100.')
 
     ## Step 3 only
-    # for set_name in ['train', 'val', 'test']:
-    #     collate_npy(
-    #         root_dir=root_dir_raw,
-    #         set_name=set_name,
-    #         seq_len=seq_len,
-    #         save_dir=save_root_dir_collate
-    #     )
+    for set_name in ['train', 'val', 'test']:
+        collate_npy(
+            root_dir=root_dir_raw,
+            set_name=set_name,
+            seq_len=seq_len,
+            save_dir=save_root_dir_collate
+        )
